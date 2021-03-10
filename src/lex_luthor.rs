@@ -330,4 +330,45 @@ mod tests {
       assert_eq!(Err(expected_error), actual);
     }
   }
+
+  #[test]
+  fn recognizes_lines_and_columns() {
+    let test_cases = vec![
+      (
+        "+",
+        Ok(vec![
+          Token::Plus(SourceSpan { line: 1, column: 1 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "\n+",
+        Ok(vec![
+          Token::Plus(SourceSpan { line: 2, column: 1 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "+\n-",
+        Ok(vec![
+          Token::Plus(SourceSpan { line: 1, column: 1 }),
+          Token::Minus(SourceSpan { line: 2, column: 1 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "\n\n\n     !",
+        Ok(vec![
+          Token::Not(SourceSpan { line: 4, column: 6 }),
+          Token::Eof,
+        ]),
+      ),
+    ];
+
+    for (input, expected) in test_cases {
+      let actual = LexLuthor::new(input.to_owned()).lex();
+
+      assert_eq!(expected, actual);
+    }
+  }
 }
