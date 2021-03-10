@@ -1,5 +1,5 @@
 use crate::source_code::SourceSpan;
-use crate::token::Token;
+use crate::token::*;
 
 #[derive(Debug, PartialEq)]
 pub struct LexLuthorError {
@@ -67,6 +67,33 @@ impl LexLuthor {
     self.position += 1;
   }
 
+  fn read_identifier_or_keyword(&mut self) -> String {
+    let start = self.position - 1;
+
+    let mut last_character = '\0';
+
+    while self.character.is_alphabetic() || self.character.is_digit(10) || self.character == '_' {
+      if last_character.is_digit(10) && self.character.is_digit(10) {
+        break;
+      }
+
+      if last_character == '_' && self.character == '_' {
+        break;
+      }
+
+      last_character = self.character;
+
+      self.read_character();
+    }
+
+    self
+      .source_code
+      .chars()
+      .skip(start)
+      .take(self.position - start)
+      .collect()
+  }
+
   fn skip_whitespace(&mut self) {
     while self.character.is_ascii_whitespace() {
       self.read_character();
@@ -121,9 +148,13 @@ impl LexLuthor {
       }
       '&' => Token::Ampersand(self.current_source_span()),
       '|' => Token::Pipe(self.current_source_span()),
-      '!' => Token::Not(self.current_source_span()),
+      '!' => Token::Bang(self.current_source_span()),
       '(' => Token::LeftParen(self.current_source_span()),
       ')' => Token::RightParen(self.current_source_span()),
+      character if character.is_alphabetic() || character == '_' => {
+        let identifier_or_keyword = self.read_identifier_or_keyword();
+        token_from_identifier_or_keyword(identifier_or_keyword, self.current_source_span())
+      }
       character => {
         self.read_character();
         return Err(LexLuthorError {
@@ -240,7 +271,7 @@ mod tests {
       ),
       (
         "!",
-        vec![Token::Not(SourceSpan { line: 1, column: 1 }), Token::Eof],
+        vec![Token::Bang(SourceSpan { line: 1, column: 1 }), Token::Eof],
       ),
       (
         "<",
@@ -359,7 +390,7 @@ mod tests {
       (
         "\n\n\n     !",
         Ok(vec![
-          Token::Not(SourceSpan { line: 4, column: 6 }),
+          Token::Bang(SourceSpan { line: 4, column: 6 }),
           Token::Eof,
         ]),
       ),
@@ -369,6 +400,109 @@ mod tests {
       let actual = LexLuthor::new(input.to_owned()).lex();
 
       assert_eq!(expected, actual);
+    }
+  }
+
+  #[test]
+  fn keywords() {
+    let test_cases = vec![
+      (
+        "program",
+        vec![
+          Token::Program(SourceSpan { line: 1, column: 7 }),
+          Token::Eof,
+        ],
+      ),
+      (
+        "define",
+        vec![Token::Define(SourceSpan { line: 1, column: 6 }), Token::Eof],
+      ),
+      (
+        "not",
+        vec![Token::Not(SourceSpan { line: 1, column: 3 }), Token::Eof],
+      ),
+      (
+        "variable",
+        vec![
+          Token::Variable(SourceSpan { line: 1, column: 8 }),
+          Token::Eof,
+        ],
+      ),
+      (
+        "is",
+        vec![Token::Is(SourceSpan { line: 1, column: 2 }), Token::Eof],
+      ),
+      (
+        "natural",
+        vec![
+          Token::Natural(SourceSpan { line: 1, column: 7 }),
+          Token::Eof,
+        ],
+      ),
+      (
+        "real",
+        vec![Token::Real(SourceSpan { line: 1, column: 4 }), Token::Eof],
+      ),
+      (
+        "char",
+        vec![Token::Char(SourceSpan { line: 1, column: 4 }), Token::Eof],
+      ),
+      (
+        "boolean",
+        vec![
+          Token::Boolean(SourceSpan { line: 1, column: 7 }),
+          Token::Eof,
+        ],
+      ),
+      (
+        "execute",
+        vec![
+          Token::Execute(SourceSpan { line: 1, column: 7 }),
+          Token::Eof,
+        ],
+      ),
+      (
+        "set",
+        vec![Token::Set(SourceSpan { line: 1, column: 3 }), Token::Eof],
+      ),
+      (
+        "get",
+        vec![Token::Get(SourceSpan { line: 1, column: 3 }), Token::Eof],
+      ),
+      (
+        "to",
+        vec![Token::To(SourceSpan { line: 1, column: 2 }), Token::Eof],
+      ),
+      (
+        "put",
+        vec![Token::Put(SourceSpan { line: 1, column: 3 }), Token::Eof],
+      ),
+      (
+        "loop",
+        vec![Token::Loop(SourceSpan { line: 1, column: 4 }), Token::Eof],
+      ),
+      (
+        "while",
+        vec![Token::While(SourceSpan { line: 1, column: 5 }), Token::Eof],
+      ),
+      (
+        "do",
+        vec![Token::Do(SourceSpan { line: 1, column: 2 }), Token::Eof],
+      ),
+      (
+        "true",
+        vec![Token::True(SourceSpan { line: 1, column: 4 }), Token::Eof],
+      ),
+      (
+        "false",
+        vec![Token::False(SourceSpan { line: 1, column: 5 }), Token::Eof],
+      ),
+    ];
+
+    for (input, expected) in test_cases {
+      let actual = LexLuthor::new(input.to_owned()).lex();
+
+      assert_eq!(Ok(expected), actual);
     }
   }
 }
