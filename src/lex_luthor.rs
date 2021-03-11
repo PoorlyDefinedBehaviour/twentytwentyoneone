@@ -2,9 +2,15 @@ use crate::source_code::SourceSpan;
 use crate::token::*;
 
 #[derive(Debug, PartialEq)]
-pub struct LexLuthorError {
-  source_span: SourceSpan,
-  message: String,
+pub enum LexLuthorError {
+  UnexpectedCharacter {
+    source_span: SourceSpan,
+    message: String,
+  },
+  InvalidIdentifier {
+    source_span: SourceSpan,
+    message: String,
+  },
 }
 
 #[derive(Debug)]
@@ -42,8 +48,12 @@ impl LexLuthor {
     self.position <= self.source_code.len()
   }
 
+  fn peek(&self) -> Option<char> {
+    self.source_code.chars().nth(self.position)
+  }
+
   fn next_character_is(&self, expected_character: char) -> bool {
-    match self.source_code.chars().nth(self.position) {
+    match self.peek() {
       None => false,
       Some(character) => character == expected_character,
     }
@@ -67,31 +77,39 @@ impl LexLuthor {
     self.position += 1;
   }
 
-  fn read_identifier_or_keyword(&mut self) -> String {
+  fn read_identifier_or_keyword(&mut self) -> Result<String, LexLuthorError> {
     let start = self.position - 1;
 
-    let mut last_character = '\0';
-
-    while self.character.is_alphabetic() || self.character.is_digit(10) || self.character == '_' {
-      if last_character.is_digit(10) && self.character.is_digit(10) {
-        break;
-      }
-
-      if last_character == '_' && self.character == '_' {
-        break;
-      }
-
-      last_character = self.character;
-
+    while self.character.is_digit(10) || self.character.is_alphabetic() || self.character == '_' {
       self.read_character();
     }
 
-    self
+    let identifier_or_keyword: String = self
       .source_code
       .chars()
       .skip(start)
       .take(self.position - start)
-      .collect()
+      .collect();
+
+    if identifier_or_keyword.len() == 1 {
+      return Ok(identifier_or_keyword);
+    }
+
+    for (index, character) in identifier_or_keyword.chars().enumerate() {
+      if (character.is_digit(10) || character == '_')
+        && !matches!(identifier_or_keyword.chars().nth(index + 1), Some(character) if character.is_alphabetic())
+      {
+        return Err(LexLuthorError::InvalidIdentifier {
+          message: format!(
+            "{} is not a valid identifier, {} must be followed by a letter",
+            identifier_or_keyword, character
+          ),
+          source_span: self.current_source_span(),
+        });
+      }
+    }
+
+    Ok(identifier_or_keyword)
   }
 
   fn skip_whitespace(&mut self) {
@@ -152,12 +170,12 @@ impl LexLuthor {
       '(' => Token::LeftParen(self.current_source_span()),
       ')' => Token::RightParen(self.current_source_span()),
       character if character.is_alphabetic() || character == '_' => {
-        let identifier_or_keyword = self.read_identifier_or_keyword();
+        let identifier_or_keyword = self.read_identifier_or_keyword()?;
         token_from_identifier_or_keyword(identifier_or_keyword, self.current_source_span())
       }
       character => {
         self.read_character();
-        return Err(LexLuthorError {
+        return Err(LexLuthorError::UnexpectedCharacter {
           source_span: self.current_source_span(),
           message: format!("unexpected character {}", character),
         });
@@ -341,14 +359,14 @@ mod tests {
     let test_cases = vec![
       (
         "?",
-        vec![LexLuthorError {
+        vec![LexLuthorError::UnexpectedCharacter {
           source_span: SourceSpan { line: 1, column: 1 },
           message: "unexpected character ?".to_owned(),
         }],
       ),
       (
         "+-=/    ?",
-        vec![LexLuthorError {
+        vec![LexLuthorError::UnexpectedCharacter {
           source_span: SourceSpan { line: 1, column: 9 },
           message: "unexpected character ?".to_owned(),
         }],
@@ -503,6 +521,78 @@ mod tests {
       let actual = LexLuthor::new(input.to_owned()).lex();
 
       assert_eq!(Ok(expected), actual);
+    }
+  }
+
+  #[test]
+  fn identifiers() {
+    let test_cases = vec![
+      (
+        "x",
+        Ok(vec![
+          Token::Identifier("x".to_owned(), SourceSpan { line: 1, column: 1 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "_x",
+        Ok(vec![
+          Token::Identifier("_x".to_owned(), SourceSpan { line: 1, column: 2 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "_",
+        Ok(vec![
+          Token::Identifier("_".to_owned(), SourceSpan { line: 1, column: 1 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "x__",
+        Err(vec![LexLuthorError::InvalidIdentifier {
+          source_span: SourceSpan { line: 1, column: 3 },
+          message: "x__ is not a valid identifier, _ must be followed by a letter".to_owned(),
+        }]),
+      ),
+      (
+        "x2",
+        Err(vec![LexLuthorError::InvalidIdentifier {
+          source_span: SourceSpan { line: 1, column: 2 },
+          message: "x2 is not a valid identifier, 2 must be followed by a letter".to_owned(),
+        }]),
+      ),
+      (
+        "x2y_z2w",
+        Ok(vec![
+          Token::Identifier("x2y_z2w".to_owned(), SourceSpan { line: 1, column: 7 }),
+          Token::Eof,
+        ]),
+      ),
+      (
+        "__",
+        Err(vec![LexLuthorError::InvalidIdentifier {
+          source_span: SourceSpan { line: 1, column: 2 },
+          message: "__ is not a valid identifier, _ must be followed by a letter".to_owned(),
+        }]),
+      ),
+      (
+        "__variable_name",
+        Err(vec![LexLuthorError::InvalidIdentifier {
+          source_span: SourceSpan {
+            line: 1,
+            column: 15,
+          },
+          message: "__variable_name is not a valid identifier, _ must be followed by a letter"
+            .to_owned(),
+        }]),
+      ),
+    ];
+
+    for (input, expected) in test_cases {
+      let actual = LexLuthor::new(input.to_owned()).lex();
+
+      assert_eq!(expected, actual);
     }
   }
 }
